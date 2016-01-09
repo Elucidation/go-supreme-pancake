@@ -22,12 +22,12 @@ const defaultstyle = "fill:rgb(127,0,0)"
 
 var port = flag.String("port", ":2003", "http service address")
 
-const WindowWidth = 576
-const WindowHeight = 350
+const WindowWidth = 500
+const WindowHeight = 400
 
-var N = 50                    // number of bodies
-var grid_cells = [2]int{9, 7} // number of cells in grid
-var grid_data = [][][]int{}   // 2d grid with array of indices of bodies overlapping cell
+var N = 50                      // number of bodies
+var grid_cells = [2]int{15, 15} // number of cells in grid
+var grid_data = [][][]int{}     // 2d grid with array of indices of bodies overlapping cell
 
 var bodies [][]float64
 var positions []float64
@@ -57,8 +57,8 @@ func initSystem() {
 	// x y radius
 
 	// body radius (in pixels)
-	minradius := 10
-	maxradius := 20
+	maxradius := math.Max(cellsize[0], cellsize[1]) / 2
+	minradius := maxradius / 2
 
 	for i := 0; i < N; i++ {
 		idx := i * 3
@@ -98,6 +98,7 @@ func bruteNearest() []int {
 	// indices of nearest neighbors for each body
 	nearest := make([]int, N)
 	dists := make([]float64, N)
+	count := 0
 
 	// For each body
 	for i := 0; i < N; i++ {
@@ -106,6 +107,7 @@ func bruteNearest() []int {
 		// check every other body, and set index to closest
 		for j := 0; j < N; j++ {
 			if i != j {
+				count++
 				r2 := getR2(bodies[i], bodies[j])
 				if r2 < dists[i] {
 					dists[i] = r2
@@ -114,6 +116,102 @@ func bruteNearest() []int {
 			}
 		}
 	}
+	fmt.Println("Brute count:", count)
+	return nearest
+}
+
+func clamp(val int, minval int, maxval int) int {
+	if val < minval {
+		return minval
+	} else if val > maxval {
+		return maxval
+	}
+	return val
+}
+
+func imin(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+func imax(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// O(n*d) number of checks for uniform density
+func gridNearest() []int {
+	// indices of nearest neighbors for each body
+	nearest := make([]int, N)
+	dists := make([]float64, N)
+	count := 0
+
+	// Initialize dists to max possible value
+	for i := 0; i < N; i++ {
+		nearest[i] = -1
+		dists[i] = WindowWidth * WindowHeight // set maxdist
+	}
+
+	// For each grid cell
+	for i := 0; i < grid_cells[0]; i++ {
+		for j := 0; j < grid_cells[1]; j++ {
+
+			// Get neighbors
+			ra := imax(0, i-1)
+			rb := imin(i+1, grid_cells[0]-1) + 1
+			ca := imax(0, j-1)
+			cb := imin(j+1, grid_cells[1]-1) + 1 // range include
+
+			// For each body in this cell
+			for _, bodyidx := range grid_data[i][j] {
+				// Golang slices don't work like matlab slices, so no slice columns
+				// http://stackoverflow.com/questions/15618155/go-lang-slice-columns-from-2d-array
+				// fmt.Printf("\nIterating [%d:%d][%d:%d]\n", ra, rb, ca, cb)
+				// For each neighbor in cell and adjacent cells
+				for _, r := range grid_data[ra:rb] {
+					for _, c := range r[ca:cb] {
+						for _, otheridx := range c {
+							// If not same body
+							if bodyidx != otheridx {
+								// Update if distance is less than last best
+								count++
+								r2 := getR2(bodies[bodyidx], bodies[otheridx])
+								if r2 < dists[bodyidx] {
+									dists[bodyidx] = r2
+									nearest[bodyidx] = otheridx
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Check those that aren't within a cell of others
+	// default to brute force check for these
+	fmt.Println(nearest)
+	fmt.Println(dists)
+	for i, v := range nearest {
+		if v == -1 {
+			// check every other body, and set index to closest
+			for j := 0; j < N; j++ {
+				if i != j {
+					count++
+					r2 := getR2(bodies[i], bodies[j])
+					if r2 < dists[i] {
+						dists[i] = r2
+						nearest[i] = j
+					}
+				}
+			}
+		}
+	}
+
+	fmt.Println("Grid count:", count)
 	return nearest
 }
 
@@ -140,17 +238,17 @@ func drawSystem(s *svg.SVG, style string) {
 }
 
 // Grid draws a grid at the specified coordinate, dimensions, and spacing, with optional style.
-func Grid2(s *svg.SVG, x int, y int, w int, h int, nx int, ny int, style ...string) {
+func Grid2(s *svg.SVG, x float64, y float64, w float64, h float64, nx float64, ny float64, style ...string) {
 
 	if len(style) > 0 {
 		s.Gstyle(style[0])
 	}
 	for ix := x; ix <= x+w; ix += nx {
-		s.Line(ix, y, ix, y+h)
+		s.Line(int(ix), int(y), int(ix), int(y+h))
 	}
 
 	for iy := y; iy <= y+h; iy += ny {
-		s.Line(x, iy, x+w, iy)
+		s.Line(int(x), int(iy), int(x+w), int(iy))
 	}
 	if len(style) > 0 {
 		s.Gend()
@@ -201,27 +299,57 @@ func brute(w http.ResponseWriter, req *http.Request) {
 
 	initSystem()
 
-	// Plot circles
-	fmt.Println("Plotting brute force")
+	// Draw system
+	fmt.Println("Drawing system of", N, "bodies")
 	drawSystem(s, shapestyle(req.URL.Path))
 
 	// Get nearest neighbors using brute force
-	nearest := bruteNearest()
+	nearestBrute := bruteNearest()
+
+	calcCells()
+	nearestGrid := gridNearest()
+
+	mismatch_count := 0
+	for i, v := range nearestBrute {
+		if v != nearestGrid[i] {
+			mismatch_count++
+			fmt.Println(mismatch_count, "MISMATCH", i, v, nearestGrid[i])
+		}
+	}
+	if mismatch_count > 0 {
+		fmt.Println("Warning, brute force & grid-based have mismatch")
+		// fmt.Println("brute", nearestBrute)
+		// fmt.Println("grid", nearestGrid)
+	}
+	nearest := nearestGrid
 
 	// Draw green line between nearest neighbors
 	for i := 0; i < N; i++ {
-		a := bodies[i]
-		b := bodies[nearest[i]]
-		s.Line(int(a[0]), int(a[1]),
-			int(b[0]), int(b[1]),
-			"stroke:green;stroke-width:3px")
+		if nearestGrid[i] != nearestBrute[i] {
+			// draw mismatch line
+			a := bodies[i]
+			b := bodies[nearestBrute[i]]
+			c := bodies[nearestGrid[i]]
+			s.Line(int(a[0]), int(a[1]),
+				int(b[0]), int(b[1]),
+				"stroke:red;stroke-width:5px")
+			s.Line(int(a[0]), int(a[1]),
+				int(c[0]), int(c[1]),
+				"stroke:orange;stroke-width:5px")
+		}
+		if nearest[i] >= 0 {
+			a := bodies[i]
+			b := bodies[nearest[i]]
+			s.Line(int(a[0]), int(a[1]),
+				int(b[0]), int(b[1]),
+				"stroke:green;stroke-width:3px")
+		}
 
 	}
 
 	// Draw grid last
-	calcCells()
 	drawCells(s)
-	Grid2(s, 0, 0, WindowWidth, WindowHeight, int(cellsize[0]), int(cellsize[1]), "stroke:rgba(100,100,100,0.5)")
+	Grid2(s, 0, 0, WindowWidth, WindowHeight, cellsize[0], cellsize[1], "stroke:rgba(100,100,100,0.5)")
 
 	s.End()
 }
