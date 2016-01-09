@@ -17,16 +17,24 @@ import (
 	"github.com/ajstarks/svgo"
 )
 
+// Globals
 const defaultstyle = "fill:rgb(127,0,0)"
 
 var port = flag.String("port", ":2003", "http service address")
 
-const WindowWidth = 500
-const WindowHeight = 500
+const WindowWidth = 576
+const WindowHeight = 350
 
-var N = 100 // number of bodies
+var N = 50                    // number of bodies
+var grid_cells = [2]int{9, 7} // number of cells in grid
+var grid_data = [][][]int{}   // 2d grid with array of indices of bodies overlapping cell
+
 var bodies [][]float64
 var positions []float64
+
+var cellsize = [2]float64{
+	float64(WindowWidth) / float64(grid_cells[0]),
+	float64(WindowHeight) / float64(grid_cells[1])}
 
 func main() {
 	rand.Seed(time.Now().Unix())
@@ -61,6 +69,15 @@ func initSystem() {
 		bodies[i] = positions[idx : idx+3]
 
 		// fmt.Println("#", i, ":", bodies[i])
+	}
+
+	// Init grid data
+	grid_data = make([][][]int, grid_cells[0])
+	for i := 0; i < grid_cells[0]; i++ {
+		grid_data[i] = make([][]int, grid_cells[1])
+		for j := 0; j < grid_cells[1]; j++ {
+			grid_data[i][j] = make([]int, 0)
+		}
 	}
 }
 
@@ -102,11 +119,76 @@ func bruteNearest() []int {
 
 func drawSystem(s *svg.SVG, style string) {
 	for i := 0; i < N; i++ {
+
+		var style_red = "fill:rgb(127,0,0)"
+		var style_blue = "fill:rgb(0,0,127)"
+		var cell = getCell(bodies[i][0], bodies[i][1])
+		// fmt.Println(i, cell)
+		var thestyle string
+		if math.Mod(float64(cell[0]+cell[1]*grid_cells[0]), 2) == 0 {
+			thestyle = style_red
+		} else {
+			thestyle = style_blue
+		}
+
 		s.Circle(
 			int(bodies[i][0]),
 			int(bodies[i][1]),
 			int(bodies[i][2]),
-			style)
+			thestyle)
+	}
+}
+
+// Grid draws a grid at the specified coordinate, dimensions, and spacing, with optional style.
+func Grid2(s *svg.SVG, x int, y int, w int, h int, nx int, ny int, style ...string) {
+
+	if len(style) > 0 {
+		s.Gstyle(style[0])
+	}
+	for ix := x; ix <= x+w; ix += nx {
+		s.Line(ix, y, ix, y+h)
+	}
+
+	for iy := y; iy <= y+h; iy += ny {
+		s.Line(x, iy, x+w, iy)
+	}
+	if len(style) > 0 {
+		s.Gend()
+	}
+
+}
+
+func calcCells() {
+	for i := 0; i < N; i++ {
+		cell := getCell(bodies[i][0], bodies[i][1])
+		// fmt.Println(i, cell, bodies[i])
+		grid_data[cell[0]][cell[1]] = append(grid_data[cell[0]][cell[1]], i)
+	}
+}
+
+func drawCells(s *svg.SVG) {
+	for i := 0; i < grid_cells[0]; i++ {
+		for j := 0; j < grid_cells[1]; j++ {
+			// fmt.Println(i, j, grid_data[i][j])
+			// TODO: draw rectangle in grid cell with color as # of objects
+			p := getGridCoords(i, j)
+			alpha := math.Min(1.0, float64(len(grid_data[i][j]))/10)
+			thestyle := fmt.Sprintf("fill:rgba(0,0,0,%f)", alpha)
+			s.Rect(p[0], p[1], int(cellsize[0]), int(cellsize[1]), thestyle)
+		}
+	}
+}
+
+func getCell(x float64, y float64) [2]int {
+	return [2]int{
+		int(x / cellsize[0]),
+		int(y / cellsize[1])}
+}
+
+func getGridCoords(cx int, cy int) [2]int {
+	return [2]int{
+		int(float64(cx) * cellsize[0]),
+		int(float64(cy) * cellsize[1]),
 	}
 }
 
@@ -118,8 +200,6 @@ func brute(w http.ResponseWriter, req *http.Request) {
 	s.Title("Nearest Neighbor Brute Force")
 
 	initSystem()
-
-	cellsize := WindowWidth / 10
 
 	// Plot circles
 	fmt.Println("Plotting brute force")
@@ -139,7 +219,9 @@ func brute(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Draw grid last
-	s.Grid(0, 0, WindowWidth, WindowHeight, cellsize, "stroke:rgba(100,100,100,0.5)")
+	calcCells()
+	drawCells(s)
+	Grid2(s, 0, 0, WindowWidth, WindowHeight, int(cellsize[0]), int(cellsize[1]), "stroke:rgba(100,100,100,0.5)")
 
 	s.End()
 }
