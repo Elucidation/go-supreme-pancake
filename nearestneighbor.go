@@ -25,8 +25,8 @@ var port = flag.String("port", ":2003", "http service address")
 const WindowWidth = 500
 const WindowHeight = 400
 
-var N = 50                      // number of bodies
-var grid_cells = [2]int{15, 15} // number of cells in grid
+var N = 100                     // number of bodies
+var grid_cells = [2]int{11, 11} // number of cells in grid
 var grid_data = [][][]int{}     // 2d grid with array of indices of bodies overlapping cell
 
 var bodies [][]float64
@@ -193,8 +193,8 @@ func gridNearest() []int {
 
 	// Check those that aren't within a cell of others
 	// default to brute force check for these
-	fmt.Println(nearest)
-	fmt.Println(dists)
+	// fmt.Println(nearest)
+	// fmt.Println(dists)
 	for i, v := range nearest {
 		if v == -1 {
 			// check every other body, and set index to closest

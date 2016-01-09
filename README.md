@@ -3,7 +3,7 @@ Go webserver serving SVG images demonstrating grid-based nearest neighbor calcul
 
 Example with 100 bodies with green lines between nearest neighbors, calculated using both brute force `O(n^2)` calculations as well as grid based `O(nd)` calculations
 
-![100 bodies with green lines to nearest neighbors](nearest_neighbors.png)
+![100 bodies with green lines to nearest neighbors](nearest_neighbors.svg)
 
 The orange and red lines show a mismatch where grid based falsely chooses a neighbor in a cell vs true distance. This is because we're naively placing bodies within cells disregarding radii, the next step will be to place bodies in all cells they overlap, resolving mismatches and reducing overall computation needed.
 
